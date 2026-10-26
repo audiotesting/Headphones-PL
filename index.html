@@ -96,6 +96,26 @@ body {font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-s
 <p>5 podstawowych testów do oceny jakości słuchawek</p>
 </div>
 
+<!-- Output device detection panel -->
+<div class="test-section" id="outputDetectSection" style="margin-top:15px;">
+<h2>&#x1f50a; Wykrywanie urządzeń wyjściowych</h2>
+<p class="description">Pokazuje głośniki / słuchawki, które widzi system. Użyj przed poniższymi testami, aby sprawdzić, czy podłączone jest właściwe urządzenie odtwarzające.</p>
+<div class="btn-row">
+<button class="btn btn-secondary" id="outDetectBtn" onclick="outDetect()">&#x1f50d; Wykryj urządzenia wyjściowe</button>
+</div>
+<div class="mic-devices" id="outDevices" style="display:none; background:rgba(0,0,0,0.2); border-radius:10px; padding:12px; margin-bottom:0;">
+<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; gap:10px;">
+<span style="font-size:12px; color:#7a7a9d;">Wykryte urządzenia wyjściowe:</span>
+<label style="font-size:11px; color:#a0a0b8; display:flex; align-items:center; gap:5px; cursor:pointer; white-space:nowrap;">
+<input type="checkbox" id="outHideBuiltin" onchange="outRenderDevices()" style="cursor:pointer;">
+Ukryj prawdopodobnie wbudowane wyjście
+</label>
+</div>
+<div id="outDeviceList" style="font-size:13px; line-height:1.6;"></div>
+</div>
+<div class="status" id="outStatus" style="margin-top:12px;">Naciśnij &quot;Wykryj urządzenia wyjściowe&quot;, aby wyświetlić podłączone głośniki / słuchawki</div>
+</div>
+
 <!-- Ostrzeżenie -->
 <div class="warning">&#x26a0;&#xfe0f; Załóż słuchawki, zacznij od NISKIEJ głośności, potem stopniowo zwiększaj.</div>
 
@@ -164,11 +184,28 @@ body {font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-s
 <div class="fail">&#x2718; NEGATYWNY: Brak reakcji, cisza, zniekształcenia lub szum</div>
 </div>
 <div class="btn-row">
+<button class="btn btn-secondary" id="micDetectBtn" onclick="micDetect()">&#x1f50d; Wykryj mikrofony</button>
 <button class="btn btn-primary" id="micEnableBtn" onclick="micEnable()">&#x1f3a4; Włącz Mikrofon</button>
 <button class="btn btn-warning" id="micRecordBtn" onclick="micRecord()" disabled>&#x23fa; Nagrywaj (5s)</button>
 <button class="btn btn-secondary" id="micPlayBtn" onclick="micPlayback()" disabled>&#x25b6; Odtwórz</button>
 <button class="btn btn-danger" id="micStopBtn" onclick="micStop()" disabled>&#x25a0; Stop</button>
 </div>
+
+<div class="mic-devices" id="micDevices" style="display:none; background:rgba(0,0,0,0.2); border-radius:10px; padding:12px; margin-bottom:15px;">
+<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; gap:10px;">
+<span style="font-size:12px; color:#7a7a9d;">Wykryte mikrofony:</span>
+<label style="font-size:11px; color:#a0a0b8; display:flex; align-items:center; gap:5px; cursor:pointer; white-space:nowrap;">
+<input type="checkbox" id="micHideBuiltin" onchange="micRenderDevices()" style="cursor:pointer;">
+Ukryj prawdopodobnie wbudowany mikrofon
+</label>
+</div>
+<div id="micDeviceList" style="font-size:13px; line-height:1.6;"></div>
+<div id="micSelectRow" style="margin-top:10px; display:none;">
+<label for="micSelect" style="font-size:12px; color:#a0a0b8; display:block; margin-bottom:4px;">Użyj tego mikrofonu:</label>
+<select id="micSelect" style="width:100%; padding:10px; border-radius:8px; background:#2a2a4a; color:#e0e0e0; border:1px solid #3a3a5a; font-size:13px;"></select>
+</div>
+</div>
+
 <div class="status" id="micStatus">Naciśnij &quot;Włącz Mikrofon&quot; &rarr; &quot;Nagrywaj&quot; &rarr; &quot;Odtwórz&quot;</div>
 <div class="mic-level-container" id="micLevelContainer" style="display:none">
 <div style="font-size:12px; color:#7a7a9d; margin-bottom:4px;">Poziom wejścia mikrofonu:</div>
@@ -388,23 +425,196 @@ document.getElementById('lrRightInd').classList.remove('active');
 let micStream = null; let micAnalyser = null; let micAnimFrame = null;
 let mediaRecorder = null; let micChunks = []; let micBlob = null; let micAudioCtx = null;
 
+
+// ========== DEVICE DETECTION (added to match SK benchmark) ==========
+let outDeviceCache = [];
+let micDeviceCache = [];
+
+function outIsLikelyBuiltin(dev) {
+var label = (dev.label || '').toLowerCase();
+if (!label) return false;
+var externalHints = ['usb','bluetooth','headset','headphone','sluchad','earbud','airpod','jabra','logitech','poly','plantronics','sennheiser','razer','hdmi','displayport','monitor','tv','dock','wireless','external','dac','soundbar'];
+if (externalHints.some(function(h){return label.includes(h);})) return false;
+var builtinHints = ['built-in','built in','builtin','internal','realtek','high definition audio','macbook','imac','laptop','notebook','speakers (','intel smart sound','onboard'];
+if (builtinHints.some(function(h){return label.includes(h);})) return true;
+return false;
+}
+
+function outRenderDevices() {
+var list = document.getElementById('outDeviceList');
+var status = document.getElementById('outStatus');
+var hideBuiltin = document.getElementById('outHideBuiltin').checked;
+if (outDeviceCache.length === 0) {
+list.innerHTML = '<span style="color:#ef5350;">✘ Nie znaleziono urządzenia wyjściowego. System nie widzi żadnego głośnika / słuchawek — sprawdź połączenie/sterownik. To problem WYKRYWANIA, a nie uszkodzone urządzenie.</span>';
+status.textContent = 'System nie wykrył żadnego urządzenia wyjściowego';
+status.style.color = '#ef5350';
+return;
+}
+var annotated = outDeviceCache.map(function(d, i){ return { dev: d, index: i, builtin: outIsLikelyBuiltin(d) }; });
+var visible = hideBuiltin ? annotated.filter(function(a){return !a.builtin;}) : annotated;
+if (visible.length === 0) {
+list.innerHTML = '<span style="color:#ffa726;">⚠ Wykryto tylko prawdopodobnie wbudowane wyjście i jest ono ukryte. Odznacz \"Ukryj prawdopodobnie wbudowane wyjście\".</span>';
+status.textContent = 'Nie wykryto zewnętrznego urządzenia wyjściowego';
+status.style.color = '#ffa726';
+return;
+}
+list.innerHTML = visible.map(function(a, j){
+var name = a.dev.label || ('Urządzenie wyjściowe ' + (a.index + 1) + ' (nazwa ukryta do czasu udzielenia zezwolenia)');
+var tag = a.builtin ? ' <span style="color:#7a7a9d; font-size:11px;">(prawdopodobnie wbudowane)</span>' : '';
+return '<div style="color:#66bb6a;">\u2714 ' + (j + 1) + '. ' + name + tag + '</div>';
+}).join('');
+var hiddenCount = annotated.length - visible.length;
+status.textContent = 'Wyświetlone urządzenia wyjściowe: ' + visible.length + (hiddenCount ? ' (' + hiddenCount + ' wbudowanych ukrytych)' : '');
+status.style.color = '#66bb6a';
+}
+
+function outDetect() {
+var devBox = document.getElementById('outDevices');
+var list = document.getElementById('outDeviceList');
+var status = document.getElementById('outStatus');
+if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
+devBox.style.display = 'block';
+list.innerHTML = '<span style="color:#ef5350;">✘ Ta przeglądarka nie obsługuje wykrywania urządzeń.</span>';
+return;
+}
+status.textContent = 'Wykrywanie urządzeń wyjściowych…';
+status.style.color = '#4fc3f7';
+navigator.mediaDevices.getUserMedia({ audio: true })
+.then(function(tmpStream){ tmpStream.getTracks().forEach(function(t){t.stop();}); return navigator.mediaDevices.enumerateDevices(); })
+.then(function(devices){ outDeviceCache = devices.filter(function(d){return d.kind === 'audiooutput';}); devBox.style.display = 'block'; outRenderDevices(); })
+.catch(function(err){
+navigator.mediaDevices.enumerateDevices().then(function(devices){
+outDeviceCache = devices.filter(function(d){return d.kind === 'audiooutput';});
+devBox.style.display = 'block';
+if (outDeviceCache.length === 0) {
+list.innerHTML = '<span style="color:#ef5350;">✘ Nie znaleziono urządzenia wyjściowego (problem WYKRYWANIA — nic nie jest podłączone/widoczne).</span>';
+status.textContent = 'System nie wykrył żadnego urządzenia wyjściowego';
+status.style.color = '#ef5350';
+} else {
+list.innerHTML = '<span style="color:#ffa726;">⚠ Wykryte urządzenia: ' + outDeviceCache.length + ', ale nazwy są ukryte. Zezwól raz na dostęp do mikrofonu, aby pojawiły się nazwy.</span>';
+status.textContent = 'Wykryte urządzenia wyjściowe: ' + outDeviceCache.length + ' (nazwy ukryte)';
+status.style.color = '#ffa726';
+}
+}).catch(function(){
+devBox.style.display = 'block';
+list.innerHTML = '<span style="color:#ef5350;">✘ Nie udało się wykryć urządzeń wyjściowych.</span>';
+status.textContent = 'Wykrywanie wyjścia nie powiodło się';
+status.style.color = '#ef5350';
+});
+});
+}
+
+function micIsLikelyBuiltin(dev) {
+var label = (dev.label || '').toLowerCase();
+if (!label) return false;
+var externalHints = ['usb','bluetooth','headset','headphone','sluchad','earbud','airpod','jabra','logitech','poly','plantronics','sennheiser','razer','blue yeti','yeti','webcam','dock','hdmi','wireless'];
+if (externalHints.some(function(h){return label.includes(h);})) return false;
+var builtinHints = ['built-in','built in','builtin','internal','realtek','high definition audio','macbook','imac','laptop','notebook','array','microphone array','intel smart sound','onboard'];
+if (builtinHints.some(function(h){return label.includes(h);})) return true;
+return false;
+}
+
+function micRenderDevices() {
+var list = document.getElementById('micDeviceList');
+var selRow = document.getElementById('micSelectRow');
+var sel = document.getElementById('micSelect');
+var status = document.getElementById('micStatus');
+var hideBuiltin = document.getElementById('micHideBuiltin').checked;
+if (micDeviceCache.length === 0) {
+list.innerHTML = '<span style="color:#ef5350;">✘ Nie znaleziono mikrofonu. System nie widzi żadnego urządzenia wejściowego — sprawdź połączenie/sterownik. To problem WYKRYWANIA, a nie uszkodzony mikrofon.</span>';
+selRow.style.display = 'none';
+status.textContent = 'System nie wykrył żadnego mikrofonu';
+status.style.color = '#ef5350';
+return;
+}
+var annotated = micDeviceCache.map(function(m, i){ return { dev: m, index: i, builtin: micIsLikelyBuiltin(m) }; });
+var visible = hideBuiltin ? annotated.filter(function(a){return !a.builtin;}) : annotated;
+if (visible.length === 0) {
+list.innerHTML = '<span style="color:#ffa726;">⚠ Wykryto tylko prawdopodobnie wbudowany mikrofon i jest on ukryty. Odznacz \"Ukryj prawdopodobnie wbudowany mikrofon\".</span>';
+selRow.style.display = 'none';
+status.textContent = 'Nie wykryto zewnętrznego mikrofonu';
+status.style.color = '#ffa726';
+return;
+}
+list.innerHTML = visible.map(function(a, j){
+var name = a.dev.label || ('Mikrofon ' + (a.index + 1) + ' (nazwa ukryta do czasu udzielenia zezwolenia)');
+var tag = a.builtin ? ' <span style="color:#7a7a9d; font-size:11px;">(prawdopodobnie wbudowany)</span>' : '';
+return '<div style="color:#66bb6a;">\u2714 ' + (j + 1) + '. ' + name + tag + '</div>';
+}).join('');
+sel.innerHTML = visible.map(function(a){ return '<option value="' + a.dev.deviceId + '">' + (a.dev.label || ('Mikrofon ' + (a.index + 1))) + (a.builtin ? ' (prawdopodobnie wbudowany)' : '') + '</option>'; }).join('');
+selRow.style.display = visible.length > 1 ? 'block' : 'none';
+var hiddenCount = annotated.length - visible.length;
+status.textContent = 'Wyświetlone mikrofony: ' + visible.length + (hiddenCount ? ' (' + hiddenCount + ' wbudowanych ukrytych)' : '') + ' — teraz naciśnij \"Włącz mikrofon\"';
+status.style.color = '#66bb6a';
+}
+
+function micDetect() {
+var devBox = document.getElementById('micDevices');
+var list = document.getElementById('micDeviceList');
+var status = document.getElementById('micStatus');
+if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
+devBox.style.display = 'block';
+list.innerHTML = '<span style="color:#ef5350;">✘ Ta przeglądarka nie obsługuje wykrywania urządzeń.</span>';
+return;
+}
+status.textContent = 'Wykrywanie mikrofonów…';
+status.style.color = '#4fc3f7';
+navigator.mediaDevices.getUserMedia({ audio: true })
+.then(function(tmpStream){ tmpStream.getTracks().forEach(function(t){t.stop();}); return navigator.mediaDevices.enumerateDevices(); })
+.then(function(devices){ micDeviceCache = devices.filter(function(d){return d.kind === 'audioinput';}); devBox.style.display = 'block'; micRenderDevices(); })
+.catch(function(err){
+devBox.style.display = 'block';
+if (err && (err.name === 'NotAllowedError' || err.name === 'SecurityError')) {
+list.innerHTML = '<span style="color:#ffa726;">⚠ Odmowa dostępu do mikrofonu. Zezwól na dostęp do mikrofonu, aby można było wykryć urządzenia.</span>';
+status.textContent = 'Odmowa dostępu — nie można stwierdzić, czy mikrofon istnieje';
+} else if (err && err.name === 'NotFoundError') {
+list.innerHTML = '<span style="color:#ef5350;">✘ Nie znaleziono mikrofonu (NotFoundError). Problem WYKRYWANIA — urządzenie nie jest podłączone/widoczne dla systemu.</span>';
+status.textContent = 'System nie wykrył żadnego mikrofonu';
+} else {
+list.innerHTML = '<span style="color:#ef5350;">✘ Błąd: ' + (err ? err.name : 'nieznany') + '</span>';
+status.textContent = 'Wykrywanie mikrofonu nie powiodło się';
+}
+document.getElementById('micSelectRow').style.display = 'none';
+status.style.color = '#ef5350';
+});
+}
+
 function micEnable() {
-navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+var sel = document.getElementById('micSelect');
+var chosenId = (sel && sel.value) ? sel.value : null;
+var constraints = chosenId ? { audio: { deviceId: { exact: chosenId } } } : { audio: true };
+navigator.mediaDevices.getUserMedia(constraints).then(function(stream){
 micStream = stream;
 micAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
-const source = micAudioCtx.createMediaStreamSource(stream);
+var source = micAudioCtx.createMediaStreamSource(stream);
 micAnalyser = micAudioCtx.createAnalyser(); micAnalyser.fftSize = 256;
 source.connect(micAnalyser);
+var activeLabel = '';
+var track = stream.getAudioTracks()[0];
+if (track) activeLabel = track.label || '';
 document.getElementById('micEnableBtn').disabled = true;
 document.getElementById('micRecordBtn').disabled = false;
 document.getElementById('micStopBtn').disabled = false;
 document.getElementById('micLevelContainer').style.display = 'block';
-document.getElementById('micStatus').textContent = 'Mikrofon aktywny \u2014 mów aby zobaczyć reakcję poziomu';
+document.getElementById('micStatus').textContent = 'Mikrofon aktywny' + (activeLabel ? ' (' + activeLabel + ')' : '') + ' — mów, aby zobaczyć reakcję poziomu';
 document.getElementById('micStatus').style.color = '#66bb6a';
 updateMicLevel();
-}).catch(err => {
-document.getElementById('micStatus').textContent = 'Brak dostępu do mikrofonu lub niedostępny';
-document.getElementById('micStatus').style.color = '#ef5350';
+}).catch(function(err){
+var status = document.getElementById('micStatus');
+var msg;
+if (err && err.name === 'NotFoundError') {
+msg = 'Nie znaleziono mikrofonu — system nie widzi żadnego urządzenia wejściowego (problem WYKRYWANIA, a nie uszkodzony mikrofon)';
+} else if (err && (err.name === 'NotAllowedError' || err.name === 'SecurityError')) {
+msg = 'Odmowa dostępu do mikrofonu — zezwól na dostęp, aby przetestować (nie można jeszcze ocenić mikrofonu)';
+} else if (err && err.name === 'NotReadableError') {
+msg = 'Znaleziono mikrofon, ale nie można go otworzyć — urządzenie zajęte lub błąd sprzętu/sterownika (prawdopodobnie USZKODZONY)';
+} else if (err && err.name === 'OverconstrainedError') {
+msg = 'Wybrany mikrofon nie jest już dostępny — uruchom ponownie \"Wykryj mikrofony\"';
+} else {
+msg = 'Mikrofon niedostępny: ' + (err ? err.name : 'error');
+}
+status.textContent = msg;
+status.style.color = '#ef5350';
 });
 }
 function updateMicLevel() {
